@@ -208,6 +208,18 @@ pytest
 renders a real stack, brings it up with docker compose, and waits for every
 component to report healthy.
 
+## Roadmap
+
+signalpost targets one host today. These are the items planned next:
+
+- [ ] **Reverse proxy + TLS** — generate an nginx/Caddy config in front of
+  Grafana and the OTLP receivers instead of leaving them on plain HTTP.
+- [ ] **Multi-host over a private network** — for hosts joined by a virtual
+  LAN (Tailscale, WireGuard, etc.), point each host's OTel Collector and
+  Prometheus remote_write at one shared Grafana/Loki/Tempo instance instead
+  of running a fully separate stack per host. Not supported yet; today each
+  host gets its own independent stack.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
