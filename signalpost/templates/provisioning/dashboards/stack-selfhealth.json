@@ -1,0 +1,82 @@
+{
+  "uid": "signalpost-stack-selfhealth",
+  "title": "signalpost / Stack Self-Health",
+  "tags": ["signalpost"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Component status",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "up{job=\"prometheus\"}", "legendFormat": "prometheus" },
+        { "expr": "up{job=\"loki\"}", "legendFormat": "loki" },
+        { "expr": "up{job=\"tempo\"}", "legendFormat": "tempo" },
+        { "expr": "up{job=\"grafana\"}", "legendFormat": "grafana" },
+        { "expr": "up{job=\"otel-collector\"}", "legendFormat": "otel-collector" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Loki push 5xx rate",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(rate(loki_request_duration_seconds_count{route=~\"api_prom_push|loki_api_v1_push\", status_code=~\"5..\"}[5m]))",
+          "legendFormat": "5xx/s"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "otel-collector refused / queue-dropped telemetry",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [
+        { "expr": "sum(rate(otelcol_receiver_refused_spans[5m]))", "legendFormat": "refused spans" },
+        { "expr": "sum(rate(otelcol_receiver_refused_metric_points[5m]))", "legendFormat": "refused metric points" },
+        { "expr": "sum(rate(otelcol_receiver_refused_log_records[5m]))", "legendFormat": "refused log records" },
+        { "expr": "sum(rate(otelcol_exporter_enqueue_failed_spans[5m]))", "legendFormat": "dropped spans (queue full)" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Prometheus rule evaluation failures",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [{ "expr": "sum(rate(prometheus_rule_evaluation_failures_total[5m]))", "legendFormat": "failures/s" }]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Tempo discarded spans",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [{ "expr": "sum(rate(tempo_discarded_spans_total[5m]))", "legendFormat": "discarded/s" }]
+    }
+  ]
+}

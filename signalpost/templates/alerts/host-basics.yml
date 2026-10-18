@@ -1,0 +1,119 @@
+groups:
+  - name: signalpost-host-basics
+    rules:
+      - alert: HostHighCPU
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage has been above 85% for 5 minutes on {{ $labels.instance }}."
+
+      - alert: HostHighMemory
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage has been above 90% for 5 minutes on {{ $labels.instance }}."
+
+      - alert: HostOutOfMemory
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 97
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Host {{ $labels.instance }} is almost out of memory"
+          description: "Available memory has been below 3% for 2 minutes on {{ $labels.instance }}. The OOM killer may start terminating processes."
+
+      - alert: HostLowDisk
+        expr: (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"})) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }} ({{ $labels.mountpoint }})"
+          description: "Disk usage has been above 85% for 5 minutes on {{ $labels.mountpoint }}."
+
+      - alert: HostDiskWillFillIn4Hours
+        expr: predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}[1h], 4 * 3600) < 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk on {{ $labels.instance }} ({{ $labels.mountpoint }}) will fill up soon"
+          description: "Based on the last hour's write rate, {{ $labels.mountpoint }} on {{ $labels.instance }} is projected to run out of space within 4 hours."
+
+      - alert: HostSwapIsFillingUp
+        expr: (1 - (node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes)) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Swap usage high on {{ $labels.instance }}"
+          description: "Swap has been more than 80% used for 10 minutes on {{ $labels.instance }}. This usually means physical memory is under sustained pressure."
+
+      - alert: HostNetworkReceiveErrors
+        expr: rate(node_network_receive_errs_total{device!="lo"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Network receive errors on {{ $labels.instance }} ({{ $labels.device }})"
+          description: "{{ $labels.device }} on {{ $labels.instance }} has been recording receive errors for 5 minutes. Check the NIC/cable/driver."
+
+      - alert: HostNetworkTransmitErrors
+        expr: rate(node_network_transmit_errs_total{device!="lo"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Network transmit errors on {{ $labels.instance }} ({{ $labels.device }})"
+          description: "{{ $labels.device }} on {{ $labels.instance }} has been recording transmit errors for 5 minutes. Check the NIC/cable/driver."
+
+      - alert: HostClockSkew
+        expr: node_timex_sync_status == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Clock not synchronised on {{ $labels.instance }}"
+          description: "NTP sync has been off for 5 minutes on {{ $labels.instance }}. Trace/log timestamps and correlation across hosts may be unreliable."
+
+      - alert: HostFileDescriptorsAlmostExhausted
+        expr: (node_filefd_allocated / node_filefd_maximum) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "File descriptors almost exhausted on {{ $labels.instance }}"
+          description: "More than 90% of the system-wide file descriptor limit is in use on {{ $labels.instance }} for 5 minutes. New connections/files may start failing."
+
+      - alert: HostHighIOWait
+        expr: avg by (instance) (rate(node_cpu_seconds_total{mode="iowait"}[5m])) * 100 > 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High disk I/O wait on {{ $labels.instance }}"
+          description: "CPU time spent waiting on disk I/O has been above 20% for 10 minutes on {{ $labels.instance }}. Disk is likely the bottleneck, not CPU."
+
+      - alert: HostMemoryPressureHigh
+        expr: rate(node_pressure_memory_waiting_seconds_total[5m]) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sustained memory pressure on {{ $labels.instance }}"
+          description: "Processes on {{ $labels.instance }} have been stalled waiting for memory (PSI) for 10 minutes. Requires kernel PSI support (Linux 4.20+); no data means this alert simply won't fire."
+
+      - alert: NodeExporterDown
+        expr: up{job="node-exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "node-exporter is down"
+          description: "Prometheus cannot scrape node-exporter on {{ $labels.instance }} for 2 minutes."

@@ -1,0 +1,167 @@
+networks:
+  signalpost:
+    name: signalpost
+
+volumes:
+  signalpost_alertmanager_data:
+  signalpost_grafana_data:
+  signalpost_loki_data:
+  signalpost_tempo_data:
+  signalpost_prometheus_data:
+
+secrets:
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password.txt
+{% if plan.notify.configured %}
+  {{ alertmanager_webhook_secret_name }}:
+    file: ./secrets/{{ alertmanager_webhook_filename }}
+{% endif %}
+
+services:
+  grafana:
+    image: {{ docker_images.grafana }}
+    container_name: signalpost-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_INSTALL_PLUGINS: ""
+    secrets:
+      - grafana_admin_password
+    volumes:
+      - signalpost_grafana_data:/var/lib/grafana
+      - ./provisioning:/etc/grafana/provisioning:ro
+    deploy:
+      resources:
+        limits:
+          memory: {{ plan.memory_limits.grafana_mb }}M
+    networks:
+      - signalpost
+    depends_on:
+      - loki
+      - tempo
+      - prometheus
+
+  loki:
+    image: {{ docker_images.loki }}
+    container_name: signalpost-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./configs/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - signalpost_loki_data:/loki
+    deploy:
+      resources:
+        limits:
+          memory: {{ plan.memory_limits.loki_mb }}M
+    networks:
+      - signalpost
+
+  tempo:
+    image: {{ docker_images.tempo }}
+    container_name: signalpost-tempo
+    restart: unless-stopped
+    command: -config.file=/etc/tempo/tempo-config.yml
+    ports:
+      - "3200:3200"
+    expose:
+      - "4317"
+    volumes:
+      - ./configs/tempo-config.yml:/etc/tempo/tempo-config.yml:ro
+      - signalpost_tempo_data:/var/tempo
+    deploy:
+      resources:
+        limits:
+          memory: {{ plan.memory_limits.tempo_mb }}M
+    networks:
+      - signalpost
+
+  prometheus:
+    image: {{ docker_images.prometheus }}
+    container_name: signalpost-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time={{ plan.metric_retention_days }}d
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
+    ports:
+      - "{{ plan.prometheus_port }}:9090"
+    volumes:
+      - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts:/etc/prometheus/alerts:ro
+      - signalpost_prometheus_data:/prometheus
+    deploy:
+      resources:
+        limits:
+          memory: {{ plan.memory_limits.prometheus_mb }}M
+    networks:
+      - signalpost
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - alertmanager
+
+  otel-collector:
+    image: {{ docker_images.otel_collector }}
+    container_name: signalpost-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otel/otel-collector-config.yml"]
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8888:8888"
+    volumes:
+      - ./configs/otel-collector-config.yml:/etc/otel/otel-collector-config.yml:ro
+    deploy:
+      resources:
+        limits:
+          memory: {{ plan.memory_limits.otel_collector_mb }}M
+    networks:
+      - signalpost
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - loki
+      - tempo
+      - prometheus
+
+  alertmanager:
+    image: {{ docker_images.alertmanager }}
+    container_name: signalpost-alertmanager
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "{{ alertmanager_port }}:{{ alertmanager_port }}"
+    volumes:
+      - ./configs/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - signalpost_alertmanager_data:/alertmanager
+{% if plan.notify.configured %}
+    secrets:
+      - {{ alertmanager_webhook_secret_name }}
+{% endif %}
+    deploy:
+      resources:
+        limits:
+          memory: {{ plan.memory_limits.alertmanager_mb }}M
+    networks:
+      - signalpost
+
+  node-exporter:
+    image: {{ docker_images.node_exporter }}
+    container_name: signalpost-node-exporter
+    restart: unless-stopped
+    command:
+      - --path.rootfs=/host
+    volumes:
+      - /:/host:ro,rslave
+    ports:
+      - "9100:9100"
+    networks:
+      - signalpost

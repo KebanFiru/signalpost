@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "signalpost"
+version = "0.1.0"
+description = "Opinionated Grafana/Loki/Tempo/Prometheus/OTel installer for small software teams"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Hakan Bağıç", email = "bussinesshakanbagic@gmail.com" }]
+keywords = [
+    "observability",
+    "grafana",
+    "loki",
+    "tempo",
+    "prometheus",
+    "opentelemetry",
+    "monitoring",
+    "devops",
+    "otel",
+    "docker-compose",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Systems Administration",
+    "Operating System :: POSIX :: Linux",
+    "Environment :: Console",
+]
+dependencies = [
+    "click>=8.1",
+    "jinja2>=3.1",
+    "rich>=13.7",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[project.urls]
+Homepage = "https://github.com/KebanFiru/signalpost"
+Repository = "https://github.com/KebanFiru/signalpost"
+Issues = "https://github.com/KebanFiru/signalpost/issues"
+Changelog = "https://github.com/KebanFiru/signalpost/blob/main/CHANGELOG.md"
+
+[project.scripts]
+signalpost = "signalpost.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["signalpost*"]
+
+[tool.setuptools.package-data]
+signalpost = ["templates/**/*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["signalpost"]

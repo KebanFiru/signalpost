@@ -1,0 +1,83 @@
+groups:
+  - name: signalpost-stack-selfhealth
+    rules:
+      - alert: SignalpostComponentDown
+        expr: up{job=~"loki|tempo|grafana|otel-collector|prometheus"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "signalpost component {{ $labels.job }} is down"
+          description: "{{ $labels.job }} has been unreachable by Prometheus for 2 minutes. Logs, traces or dashboards may be unavailable."
+
+      - alert: LokiIngestErrors
+        expr: sum(rate(loki_request_duration_seconds_count{route=~"api_prom_push|loki_api_v1_push", status_code=~"5.."}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Loki is rejecting log pushes"
+          description: "Loki has returned 5xx responses on the push path for 5 minutes straight. Logs are being dropped."
+
+      - alert: LokiHighIngestionLatency
+        expr: histogram_quantile(0.99, sum by (le) (rate(loki_request_duration_seconds_bucket{route=~"api_prom_push|loki_api_v1_push"}[5m]))) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Loki push latency is high"
+          description: "p99 latency on Loki's push path has been above 2s for 10 minutes. Log delivery to Grafana may be delayed."
+
+      - alert: TempoDiscardingSpans
+        expr: sum(rate(tempo_discarded_spans_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tempo is discarding spans"
+          description: "Tempo has been dropping spans for 5 minutes (likely due to rate limiting or storage pressure). Traces will have gaps."
+
+      - alert: PrometheusConfigReloadFailed
+        expr: prometheus_config_last_reload_successful == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus config reload failed"
+          description: "Prometheus's last configuration reload failed. It is likely still running the previous config — new scrape targets or rules aren't active."
+
+      - alert: PrometheusRuleEvaluationFailures
+        expr: sum(rate(prometheus_rule_evaluation_failures_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus alert rule evaluation is failing"
+          description: "Prometheus has failed to evaluate one or more alerting/recording rules for 5 minutes straight. Some alerts may not fire."
+
+      - alert: PrometheusTSDBCompactionsFailing
+        expr: sum(rate(prometheus_tsdb_compactions_failed_total[15m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus TSDB compactions are failing"
+          description: "Prometheus's local storage has had failing compactions for 15 minutes. Disk usage may grow faster than expected and queries may slow down."
+
+      - alert: OtelCollectorDataRefused
+        expr: sum(rate(otelcol_receiver_refused_spans[5m])) + sum(rate(otelcol_receiver_refused_metric_points[5m])) + sum(rate(otelcol_receiver_refused_log_records[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "otel-collector is refusing incoming telemetry"
+          description: "The collector's receiver has been refusing spans/metrics/logs for 5 minutes, usually because memory_limiter is under pressure. Instrumented services will see failed exports."
+
+      - alert: OtelCollectorQueueFull
+        expr: sum(rate(otelcol_exporter_enqueue_failed_spans[5m])) + sum(rate(otelcol_exporter_enqueue_failed_metric_points[5m])) + sum(rate(otelcol_exporter_enqueue_failed_log_records[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "otel-collector export queue is dropping data"
+          description: "The collector's export retry queue has been full and dropping telemetry for 5 minutes. Downstream (Tempo/Loki/Prometheus) may be slow or unreachable."

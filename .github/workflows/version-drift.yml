@@ -1,0 +1,51 @@
+name: Version drift check
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" 
+    
+  workflow_dispatch: {}
+
+jobs:
+  check-versions:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check for upstream version drift
+        id: check
+        run: |
+          set +e
+          python3 scripts/update_versions.py --check
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+          elif [ "$code" -eq 1 ]; then
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::update_versions.py failed (exit $code) — likely a fetch error, not real drift. Not opening an issue."
+            exit "$code"
+          fi
+
+      - name: Open an issue on drift
+        if: steps.check.outputs.drift == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          existing=$(gh issue list --state open --search "in:title \"Component versions are out of date\"" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            echo "Drift issue #$existing is already open, not opening another."
+            exit 0
+          fi
+          gh issue create \
+            --title "Component versions are out of date" \
+            --body "Weekly version-drift check found that \`signalpost/versions.py\` no longer matches the latest upstream releases. Run \`make update-versions\` locally, review the diff, and commit it. Opened automatically by .github/workflows/version-drift.yml."

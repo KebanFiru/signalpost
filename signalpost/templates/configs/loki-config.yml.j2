@@ -1,0 +1,58 @@
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  retention_period: {{ plan.log_retention_days }}d
+  ingestion_rate_mb: {{ plan.loki_ingest_mbps }}
+  ingestion_burst_size_mb: {{ plan.loki_ingest_mbps * 2 }}
+  per_stream_rate_limit: {{ plan.loki_ingest_mbps }}MB
+  per_stream_rate_limit_burst: {{ plan.loki_ingest_mbps * 2 }}MB
+  max_query_series: 10000
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  retention_delete_delay: 2h
+  delete_request_store: filesystem
+
+ruler:
+  storage:
+    type: local
+    local:
+      directory: /loki/rules
+  rule_path: /loki/rules-tmp
+  alertmanager_url: ""
+  ring:
+    kvstore:
+      store: inmemory
+  enable_api: true
+
+analytics:
+  reporting_enabled: false

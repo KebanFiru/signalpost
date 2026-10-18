@@ -1,0 +1,84 @@
+{% set web_jobs = plan.scrape_targets | selectattr("service.framework", "in", ["fastapi", "flask", "django"]) | map(attribute="job_name") | list %}
+{% set job_regex = web_jobs | join("|") if web_jobs else ".*" %}
+{% set legend_job = "{{job}}" %}
+{
+  "uid": "signalpost-http-red",
+  "title": "signalpost / HTTP RED",
+  "tags": ["signalpost"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Request rate",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (job) (rate(http_server_request_duration_seconds_count{job=~\"{{ job_regex }}\"}[5m]))",
+          "legendFormat": "{{ legend_job }}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Error rate (5xx %)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "100 * sum by (job) (rate(http_server_request_duration_seconds_count{job=~\"{{ job_regex }}\", http_response_status_code=~\"5..\"}[5m])) / sum by (job) (rate(http_server_request_duration_seconds_count{job=~\"{{ job_regex }}\"}[5m]))",
+          "legendFormat": "{{ legend_job }}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Latency p50 / p95 / p99",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (job, le) (rate(http_server_request_duration_seconds_bucket{job=~\"{{ job_regex }}\"}[5m])))",
+          "legendFormat": "p50 {{ legend_job }}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (job, le) (rate(http_server_request_duration_seconds_bucket{job=~\"{{ job_regex }}\"}[5m])))",
+          "legendFormat": "p95 {{ legend_job }}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (job, le) (rate(http_server_request_duration_seconds_bucket{job=~\"{{ job_regex }}\"}[5m])))",
+          "legendFormat": "p99 {{ legend_job }}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "text",
+      "title": "Log <-> Trace <-> Metric correlation",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "options": {
+        "mode": "markdown",
+        "content": "Click a `trace_id` in the **Logs** panel below to jump straight into its trace in Tempo. From a Tempo trace, jump back to its logs in Loki or its service graph in Prometheus. Exemplars on the panels above link straight into Tempo as well.\n\nThis works out of the box because signalpost pins the Loki/Tempo/Prometheus datasource UIDs and wires derivedFields / tracesToLogsV2 / exemplar destinations for you — see `provisioning/datasources/datasources.yml`."
+      }
+    },
+    {
+      "id": 5,
+      "type": "logs",
+      "title": "Logs",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "enableLogDetails": true },
+      "targets": [{ "expr": "{job=~\"{{ job_regex }}\"}" }]
+    }
+  ]
+}

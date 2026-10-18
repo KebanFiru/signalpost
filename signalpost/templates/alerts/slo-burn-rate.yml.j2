@@ -1,0 +1,57 @@
+{% set web_jobs = plan.scrape_targets | selectattr("service.framework", "in", ["fastapi", "flask", "django"]) | map(attribute="job_name") | list %}
+{% set job_regex = web_jobs | join("|") if web_jobs else ".*" %}
+{% set error_budget = (100 - slo_target_pct) / 100 %}
+{% set fast_threshold = (slo_fast_burn_rate * error_budget) | round(6) %}
+{% set slow_threshold = (slo_slow_burn_rate * error_budget) | round(6) %}
+{% raw %}
+groups:
+  - name: signalpost-slo-burn-rate
+    rules:
+      - alert: SLOErrorBudgetFastBurn
+        expr: |
+{% endraw %}
+          (
+            sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}", http_response_status_code=~"5.."}[5m]))
+            /
+            sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}"}[5m]))
+          ) > {{ fast_threshold }}
+          and
+          (
+            sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}", http_response_status_code=~"5.."}[1h]))
+            /
+            sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}"}[1h]))
+          ) > {{ fast_threshold }}
+{% raw %}
+        for: 2m
+        labels:
+          severity: critical
+          slo_window: fast_burn
+        annotations:
+          summary: "{{ $labels.job }} is fast-burning its error budget"
+{% endraw %}
+          description: "{{ '{{ $labels.job }}' }} is on track to exhaust its {{ slo_target_pct }}% SLO's monthly error budget in under 2 days if this continues (5m and 1h error-rate windows both above {{ fast_threshold }})."
+{% raw %}
+
+      - alert: SLOErrorBudgetSlowBurn
+        expr: |
+{% endraw %}
+          (
+            sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}", http_response_status_code=~"5.."}[30m]))
+            /
+            sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}"}[30m]))
+          ) > {{ slow_threshold }}
+          and
+          (
+            sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}", http_response_status_code=~"5.."}[6h]))
+            /
+            sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}"}[6h]))
+          ) > {{ slow_threshold }}
+{% raw %}
+        for: 15m
+        labels:
+          severity: warning
+          slo_window: slow_burn
+        annotations:
+          summary: "{{ $labels.job }} is slow-burning its error budget"
+{% endraw %}
+          description: "{{ '{{ $labels.job }}' }} is on track to exhaust its {{ slo_target_pct }}% SLO's monthly error budget in under 6 days if this continues (30m and 6h error-rate windows both above {{ slow_threshold }}). File a ticket, this doesn't need a page yet."

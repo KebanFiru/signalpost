@@ -1,0 +1,101 @@
+{% set web_jobs = plan.scrape_targets | selectattr("service.framework", "in", ["fastapi", "flask", "django"]) | map(attribute="job_name") | list %}
+{% set job_regex = web_jobs | join("|") if web_jobs else ".*" %}
+{% raw %}
+groups:
+  - name: signalpost-http-red
+    rules:
+      - alert: ElevatedHttp5xxRate
+        expr: |
+{% endraw %}
+          sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}", http_response_status_code=~"5.."}[5m]))
+          /
+          sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}"}[5m]))
+          > 0.01
+{% raw %}
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated 5xx error rate on {{ $labels.job }}"
+          description: "{{ $labels.job }} has returned 5xx responses for more than 1% of requests over 15 minutes. Early warning before the critical threshold."
+
+      - alert: HighHttp5xxRate
+        expr: |
+{% endraw %}
+          sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}", http_response_status_code=~"5.."}[5m]))
+          /
+          sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}"}[5m]))
+          > 0.05
+{% raw %}
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High 5xx error rate on {{ $labels.job }}"
+          description: "{{ $labels.job }} has returned 5xx responses for more than 5% of requests over 5 minutes."
+
+      - alert: HighHttp4xxRate
+        expr: |
+{% endraw %}
+          sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}", http_response_status_code=~"4.."}[10m]))
+          /
+          sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}"}[10m]))
+          > 0.25
+{% raw %}
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High 4xx client error rate on {{ $labels.job }}"
+          description: "{{ $labels.job }} has returned 4xx responses for more than 25% of requests over 10 minutes. Often a sign of a broken client, bad deploy, or API contract change."
+
+      - alert: HighHttpLatencyP95
+        expr: |
+{% endraw %}
+          histogram_quantile(0.95, sum by (job, le) (rate(http_server_request_duration_seconds_bucket{job=~"{{ job_regex }}"}[5m]))) > 1
+{% raw %}
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High p95 latency on {{ $labels.job }}"
+          description: "{{ $labels.job }} p95 request latency has been above 1s for 5 minutes."
+
+      - alert: HighHttpLatencyP99
+        expr: |
+{% endraw %}
+          histogram_quantile(0.99, sum by (job, le) (rate(http_server_request_duration_seconds_bucket{job=~"{{ job_regex }}"}[5m]))) > 2.5
+{% raw %}
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Very high p99 latency on {{ $labels.job }}"
+          description: "{{ $labels.job }} p99 request latency has been above 2.5s for 5 minutes. Your slowest requests are likely timing out for users."
+
+      - alert: HttpTrafficDroppedToZero
+        expr: |
+{% endraw %}
+          sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}"}[5m])) == 0
+{% raw %}
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No HTTP traffic on {{ $labels.job }}"
+          description: "{{ $labels.job }} has received zero requests for 10 minutes. This may indicate an upstream routing issue or an outage."
+
+      - alert: HttpTrafficDropSharp
+        expr: |
+{% endraw %}
+          sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}"}[5m]))
+          <
+          0.5 * (sum by (job) (rate(http_server_request_duration_seconds_count{job=~"{{ job_regex }}"}[1h] offset 1h)))
+{% raw %}
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Traffic on {{ $labels.job }} dropped sharply"
+          description: "{{ $labels.job }} request rate has been less than half of the same period last hour, for 10 minutes. Could be an upstream outage or a broken deploy — or just an expected quiet period."
+{% endraw %}

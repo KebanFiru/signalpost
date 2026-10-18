@@ -1,0 +1,64 @@
+{% set is_binary = plan.install_mode == "binary" %}
+{% set loki_host = "localhost" if is_binary else "loki" %}
+{% set tempo_host = "localhost" if is_binary else "tempo" %}
+{% set prometheus_host = "localhost" if is_binary else "prometheus" %}
+{% set prometheus_port = plan.prometheus_port if is_binary else 9090 %}
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://{{ loki_host }}:3100
+    jsonData:
+      maxLines: 1000
+      derivedFields:
+        - datasourceUid: tempo
+          matcherRegex: "trace_id=(\\w+)"
+          name: TraceID
+          url: "$${__value.raw}"
+          urlDisplayLabel: "View Trace"
+
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://{{ tempo_host }}:3200
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+        filterByTraceID: false
+        filterBySpanID: false
+        tags:
+          - key: "service.name"
+            value: "service_name"
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+        tags:
+          - key: "service.name"
+            value: "service_name"
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
+      lokiSearch:
+        datasourceUid: loki
+
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://{{ prometheus_host }}:{{ prometheus_port }}
+    jsonData:
+      httpMethod: POST
+      exemplarTraceIdDestinations:
+        - datasourceUid: tempo
+          name: trace_id
+      timeInterval: "15s"

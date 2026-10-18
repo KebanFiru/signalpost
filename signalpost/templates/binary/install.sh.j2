@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Run this script as root: sudo ./install.sh" >&2
+  exit 1
+fi
+
+for tool in curl tar unzip sha256sum; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "Required tool missing: $tool" >&2; exit 1; }
+done
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_ROOT="{{ install_root }}"
+SERVICE_USER="{{ systemd_user }}"
+ARCH="{{ detection.arch }}"
+
+id -u "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER"
+
+mkdir -p "$INSTALL_ROOT"
+
+verify_sha256() {
+  local file="$1" expected="$2" actual
+  actual="$(sha256sum "$file" | awk '{print $1}')"
+  if [ "$actual" != "$expected" ]; then
+    echo "" >&2
+    echo "CHECKSUM MISMATCH for $file" >&2
+    echo "  expected: $expected" >&2
+    echo "  actual:   $actual" >&2
+    echo "Refusing to install. The download was corrupted or tampered with." >&2
+    rm -f "$file"
+    exit 1
+  fi
+}
+
+download_verified() {
+  local name="$1" url="$2" expected="$3" dest="$4"
+  echo "Downloading $name"
+  curl -fsSL --retry 3 "$url" -o "$dest"
+  verify_sha256 "$dest" "$expected"
+}
+
+install_tar_gz() {
+  local name="$1" url="$2" expected="$3" strip="$4"
+  local dest="$INSTALL_ROOT/$name" archive="/tmp/signalpost-$name.tar.gz"
+  mkdir -p "$dest"
+  download_verified "$name" "$url" "$expected" "$archive"
+  tar -xzf "$archive" -C "$dest" --strip-components="$strip"
+  rm -f "$archive"
+}
+
+echo "Installing Prometheus {{ release_versions.prometheus }}"
+install_tar_gz prometheus "{{ release_urls.prometheus }}" "{{ release_checksums.prometheus }}" 1
+
+echo "Installing Loki {{ release_versions.loki }}"
+mkdir -p "$INSTALL_ROOT/loki"
+download_verified loki "{{ release_urls.loki }}" "{{ release_checksums.loki }}" "/tmp/signalpost-loki.zip"
+unzip -oq "/tmp/signalpost-loki.zip" -d "$INSTALL_ROOT/loki"
+mv "$INSTALL_ROOT/loki/loki-linux-$ARCH" "$INSTALL_ROOT/loki/loki"
+chmod +x "$INSTALL_ROOT/loki/loki"
+rm -f "/tmp/signalpost-loki.zip"
+
+echo "Installing Tempo {{ release_versions.tempo }}"
+install_tar_gz tempo "{{ release_urls.tempo }}" "{{ release_checksums.tempo }}" 0
+
+echo "Installing Grafana {{ release_versions.grafana }}"
+install_tar_gz grafana "{{ release_urls.grafana }}" "{{ release_checksums.grafana }}" 1
+
+echo "Installing otel-collector-contrib {{ release_versions.otel_collector }}"
+install_tar_gz otel-collector "{{ release_urls.otel_collector }}" "{{ release_checksums.otel_collector }}" 0
+
+echo "Installing node_exporter {{ release_versions.node_exporter }}"
+install_tar_gz node_exporter "{{ release_urls.node_exporter }}" "{{ release_checksums.node_exporter }}" 1
+
+echo "Installing Alertmanager {{ release_versions.alertmanager }}"
+install_tar_gz alertmanager "{{ release_urls.alertmanager }}" "{{ release_checksums.alertmanager }}" 1
+
+mkdir -p "$INSTALL_ROOT/prometheus/data" "$INSTALL_ROOT/loki/data" "$INSTALL_ROOT/tempo/data" "$INSTALL_ROOT/grafana/data" "$INSTALL_ROOT/alertmanager/data"
+chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_ROOT"
+chown -R "$SERVICE_USER:$SERVICE_USER" "$SCRIPT_DIR/secrets" 2>/dev/null || true
+chmod 600 "$SCRIPT_DIR/secrets/{{ grafana_password_filename }}" 2>/dev/null || true
+chmod 600 "$SCRIPT_DIR/secrets/{{ alertmanager_webhook_filename }}" 2>/dev/null || true
+
+cat > /etc/systemd/system/signalpost-prometheus.service <<UNIT
+[Unit]
+Description=signalpost Prometheus
+After=network-online.target signalpost-alertmanager.service
+
+[Service]
+User=$SERVICE_USER
+ExecStart=$INSTALL_ROOT/prometheus/prometheus --config.file=$SCRIPT_DIR/configs/prometheus.yml --storage.tsdb.path=$INSTALL_ROOT/prometheus/data --storage.tsdb.retention.time={{ plan.metric_retention_days }}d --web.enable-remote-write-receiver --web.listen-address=:{{ plan.prometheus_port }}
+Restart=on-failure
+MemoryMax={{ plan.memory_limits.prometheus_mb }}M
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+cat > /etc/systemd/system/signalpost-alertmanager.service <<UNIT
+[Unit]
+Description=signalpost Alertmanager
+After=network-online.target
+
+[Service]
+User=$SERVICE_USER
+ExecStart=$INSTALL_ROOT/alertmanager/alertmanager --config.file=$SCRIPT_DIR/configs/alertmanager.yml --storage.path=$INSTALL_ROOT/alertmanager/data --web.listen-address=:{{ alertmanager_port }}
+Restart=on-failure
+MemoryMax={{ plan.memory_limits.alertmanager_mb }}M
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+cat > /etc/systemd/system/signalpost-loki.service <<UNIT
+[Unit]
+Description=signalpost Loki
+After=network-online.target
+
+[Service]
+User=$SERVICE_USER
+ExecStart=$INSTALL_ROOT/loki/loki -config.file=$SCRIPT_DIR/configs/loki-config.yml
+Restart=on-failure
+MemoryMax={{ plan.memory_limits.loki_mb }}M
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+cat > /etc/systemd/system/signalpost-tempo.service <<UNIT
+[Unit]
+Description=signalpost Tempo
+After=network-online.target
+
+[Service]
+User=$SERVICE_USER
+ExecStart=$INSTALL_ROOT/tempo/tempo -config.file=$SCRIPT_DIR/configs/tempo-config.yml
+Restart=on-failure
+MemoryMax={{ plan.memory_limits.tempo_mb }}M
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+cat > /etc/systemd/system/signalpost-otel-collector.service <<UNIT
+[Unit]
+Description=signalpost OpenTelemetry Collector
+After=network-online.target signalpost-loki.service signalpost-tempo.service signalpost-prometheus.service
+
+[Service]
+User=$SERVICE_USER
+ExecStart=$INSTALL_ROOT/otel-collector/otelcol-contrib --config=$SCRIPT_DIR/configs/otel-collector-config.yml
+Restart=on-failure
+MemoryMax={{ plan.memory_limits.otel_collector_mb }}M
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+cat > /etc/systemd/system/signalpost-node-exporter.service <<UNIT
+[Unit]
+Description=signalpost node_exporter
+After=network-online.target
+
+[Service]
+User=$SERVICE_USER
+ExecStart=$INSTALL_ROOT/node_exporter/node_exporter
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+cat > /etc/systemd/system/signalpost-grafana.service <<UNIT
+[Unit]
+Description=signalpost Grafana
+After=network-online.target signalpost-loki.service signalpost-tempo.service signalpost-prometheus.service
+
+[Service]
+User=$SERVICE_USER
+Environment=GF_PATHS_PROVISIONING=$SCRIPT_DIR/provisioning
+Environment=GF_PATHS_DATA=$INSTALL_ROOT/grafana/data
+Environment=GF_SERVER_HTTP_PORT=3000
+Environment=GF_SECURITY_ADMIN_USER=admin
+Environment=GF_SECURITY_ADMIN_PASSWORD__FILE=$SCRIPT_DIR/secrets/{{ grafana_password_filename }}
+ExecStart=$INSTALL_ROOT/grafana/bin/grafana server --homepath=$INSTALL_ROOT/grafana
+Restart=on-failure
+MemoryMax={{ plan.memory_limits.grafana_mb }}M
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable signalpost-prometheus signalpost-alertmanager signalpost-loki signalpost-tempo signalpost-otel-collector signalpost-node-exporter signalpost-grafana
+
+echo ""
+echo "Installed. signalpost did not start the services yet. Review the units under /etc/systemd/system/signalpost-*.service, then run:"
+echo "  sudo systemctl start signalpost-alertmanager signalpost-prometheus signalpost-loki signalpost-tempo signalpost-otel-collector signalpost-node-exporter signalpost-grafana"
+echo "Grafana will be reachable on :3000 once started."
+{% if not plan.notify.configured %}
+echo ""
+echo "NOTE: no notification target is configured - alerts will fire but reach no one."
+echo "      Re-run: signalpost deploy --notify <slack-or-discord-webhook-url>"
+{% endif %}

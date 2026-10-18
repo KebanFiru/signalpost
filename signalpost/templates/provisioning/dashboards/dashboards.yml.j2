@@ -1,0 +1,14 @@
+{% set dashboards_path = output_dir_posix ~ "/provisioning/dashboards" if plan.install_mode == "binary" else "/etc/grafana/provisioning/dashboards" %}
+apiVersion: 1
+
+providers:
+  - name: signalpost
+    orgId: 1
+    folder: signalpost
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: {{ dashboards_path }}
+      foldersFromFilesStructure: false
