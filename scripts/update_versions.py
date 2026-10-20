@@ -66,8 +66,9 @@ COMPONENTS = {
         "repo": "open-telemetry/opentelemetry-collector-releases",
         "url": "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{version}/otelcol-contrib_{version}_linux_{arch}.tar.gz",
         "artifact": "otelcol-contrib_{version}_linux_{arch}.tar.gz",
-        "checksums": "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{version}/opentelemetry-collector-releases_otelcol-contrib_checksums.txt",
-        "tag_prefix": "cmd/otelcorecol/v",
+        "checksums": "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{version}/otelcol-contrib_{version}_linux_{arch}.tar.gz.sha256",
+        "checksum_per_arch": True,
+        "legacy_checksums": "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{version}/opentelemetry-collector-releases_otelcol-contrib_checksums.txt",
     },
     "node_exporter": {
         "repo": "prometheus/node_exporter",
@@ -119,15 +120,21 @@ def checksums_for(name: str, spec: dict, version: str) -> dict[str, str]:
     """Return {arch: sha256} for one component at one version."""
     result: dict[str, str] = {}
 
+    checksums_url = spec["checksums"]
     if spec.get("checksum_per_arch"):
-        for arch in ARCHES:
-            raw = fetch(spec["checksums"].format(version=version, arch=arch)).split()
-            if not raw or not re.fullmatch(r"[0-9a-f]{64}", raw[0]):
-                raise ValueError(f"{name}/{arch}: unexpected checksum payload")
-            result[arch] = raw[0]
-        return result
+        try:
+            for arch in ARCHES:
+                raw = fetch(checksums_url.format(version=version, arch=arch)).split()
+                if not raw or not re.fullmatch(r"[0-9a-f]{64}", raw[0]):
+                    raise ValueError(f"{name}/{arch}: unexpected checksum payload")
+                result[arch] = raw[0]
+            return result
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404 or "legacy_checksums" not in spec:
+                raise
+            checksums_url = spec["legacy_checksums"]
 
-    listing = parse_checksums(fetch(spec["checksums"].format(version=version)))
+    listing = parse_checksums(fetch(checksums_url.format(version=version)))
     for arch in ARCHES:
         artifact = spec["artifact"].format(version=version, arch=arch)
         if artifact not in listing:
