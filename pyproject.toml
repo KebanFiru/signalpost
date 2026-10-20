@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "signalpost"
-version = "0.1.1"
+version = "0.1.2"
 description = "Opinionated Grafana/Loki/Tempo/Prometheus/OTel installer for small software teams"
 readme = "README.md"
 requires-python = ">=3.10"
